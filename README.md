@@ -11,6 +11,10 @@ cd fish_speech_docker
 ```
 
 2. Place your model checkpoints in the `checkpoints` directory.
+Download the required vqgan and llama models from our huggingface repository.
+```bash
+huggingface-cli download fishaudio/fish-speech-1.5 --local-dir checkpoints/fish-speech-1
+```
 
 3. Start the container:
 ```bash
