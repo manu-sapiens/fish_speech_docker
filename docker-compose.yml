@@ -1,0 +1,26 @@
+services:
+  fish-speech:
+    image: fishaudio/fish-speech:latest-dev
+    runtime: nvidia  # Specify nvidia runtime
+    ports:
+      - "7860:7860"  # For the Gradio web interface
+    volumes:
+      - ./checkpoints:/opt/fish-speech/checkpoints  # For model checkpoints
+      - ./outputs:/opt/fish-speech/outputs  # For generated audio outputs
+      - ./tools:/opt/fish-speech/tools  # For our CUDA check script
+      - ./fish-speech:/opt/fish-speech/fish-speech  # Mount the submodule
+    working_dir: /opt/fish-speech
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=all
+      - GRADIO_SERVER_NAME=0.0.0.0
+    command: >
+      sh -c "python tools/check_cuda.py &&
+             python fish-speech/tools/run_webui.py"

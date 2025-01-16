@@ -1,0 +1,5 @@
+# Ignore checkpoints directory (large files)
+/checkpoints/
+
+# Ignore nested git repositories
+/fish-speech/.git/
