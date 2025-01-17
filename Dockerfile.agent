@@ -1,0 +1,53 @@
+FROM nvidia/cuda:12.1.0-runtime-ubuntu22.04
+ARG TARGETARCH
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV PYTHONUNBUFFERED=1
+ENV GRADIO_SERVER_NAME=0.0.0.0
+
+ARG DEPENDENCIES="  \
+    ca-certificates \
+    python3.10 \
+    python3.10-dev \
+    python3-pip \
+    libsox-dev \
+    build-essential \
+    cmake \
+    libasound-dev \
+    portaudio19-dev \
+    libportaudio2 \
+    libportaudiocpp0 \
+    ffmpeg"
+
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    set -ex \
+    && rm -f /etc/apt/apt.conf.d/docker-clean \
+    && echo 'Binary::apt::APT::Keep-Downloaded-Packages "true";' >/etc/apt/apt.conf.d/keep-cache \
+    && apt-get update \
+    && apt-get -y install --no-install-recommends software-properties-common \
+    && add-apt-repository ppa:deadsnakes/ppa \
+    && apt-get update \
+    && apt-get -y install --no-install-recommends ${DEPENDENCIES} \
+    && ln -sf /usr/bin/python3.10 /usr/bin/python3 \
+    && ln -sf /usr/bin/python3.10 /usr/bin/python
+
+WORKDIR /opt/fish-speech
+
+COPY ./fish-speech /opt/fish-speech/fish-speech
+
+RUN --mount=type=cache,target=/root/.cache,sharing=locked \
+    set -ex \
+    && python3 -m pip install --upgrade pip \
+    && pip install torch torchaudio \
+    && pip install gradio pyrootutils \
+    && cd fish-speech \
+    && pip install -e .[stable] \
+    && pip install cachetools
+
+EXPOSE 7860
+EXPOSE 8000
+EXPOSE 8080
+
+# Start both the API server and web UI
+CMD ["sh", "-c", "cd fish-speech && python -m tools.api --llama-checkpoint-path $LLAMA_CHECKPOINT_PATH --mode agent --compile --decoder-checkpoint-path $FISH_SPEECH_GAN_PATH & python -m tools.e2e_webui --model-path $FISH_SPEECH_MODEL_PATH --gan-path $FISH_SPEECH_GAN_PATH"]

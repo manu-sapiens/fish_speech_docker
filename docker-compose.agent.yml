@@ -1,14 +1,14 @@
 services:
   fish-speech:
     image: fishaudio/fish-speech:latest-dev
-    runtime: nvidia  # Specify nvidia runtime
+    runtime: nvidia
     ports:
-      - "3140:7860"  # For the Gradio web interface
+      - "3140:7860"  # For the Fish Speech Gradio web interface
     volumes:
-      - ./checkpoints:/opt/fish-speech/checkpoints  # For model checkpoints
-      - ./outputs:/opt/fish-speech/outputs  # For generated audio outputs
-      - ./tools:/opt/fish-speech/tools  # For our CUDA check script
-      - ./fish-speech:/opt/fish-speech/fish-speech  # Mount the submodule
+      - ./checkpoints:/opt/fish-speech/checkpoints:ro  # Read-only mount
+      - ./outputs:/opt/fish-speech/outputs
+      - ./tools:/opt/fish-speech/tools
+      - ./fish-speech:/opt/fish-speech/fish-speech
     working_dir: /opt/fish-speech
     deploy:
       resources:
@@ -23,12 +23,12 @@ services:
       - GRADIO_SERVER_NAME=0.0.0.0
     command: >
       sh -c "python tools/check_cuda.py &&
-             python fish-speech/tools/webui.py"
+             python tools/run_webui.py"
 
   fish-agent:
     build:
-      context: .
-      dockerfile: Dockerfile.agent
+      context: . 
+      dockerfile: dockerfile.agent
     runtime: nvidia
     ports:
       - "3141:7860"  # For the Fish Agent Gradio web interface (e2e_webui.py)
@@ -36,8 +36,6 @@ services:
     volumes:
       - ./checkpoints:/opt/fish-speech/checkpoints:ro  # Read-only mount
       - ./outputs:/opt/fish-speech/outputs
-      - ./fish-speech:/opt/fish-speech/fish-speech  # Mount the fish-speech submodule
-    working_dir: /opt/fish-speech
     deploy:
       resources:
         reservations:
@@ -49,10 +47,3 @@ services:
       - NVIDIA_VISIBLE_DEVICES=all
       - NVIDIA_DRIVER_CAPABILITIES=all
       - GRADIO_SERVER_NAME=0.0.0.0
-      - GRADIO_SERVER_PORT=7860
-      - FISH_SPEECH_URL=http://fish-speech:7860
-      - FISH_SPEECH_MODEL_PATH=/opt/fish-speech/checkpoints/fish-speech-1.4
-      - FISH_SPEECH_GAN_PATH=/opt/fish-speech/checkpoints/fish-speech-1.4/firefly-gan-vq-fsq-8x1024-21hz-generator.pth
-      - LLAMA_CHECKPOINT_PATH=/opt/fish-speech/checkpoints/fish-speech-1.4
-    depends_on:
-      - fish-speech  # Ensure fish-speech starts first
