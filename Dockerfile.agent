@@ -58,4 +58,4 @@ EXPOSE 8000
 EXPOSE 8080
 
 # Start both the API server and web UI
-CMD ["sh", "-c", "cd /opt/fish-speech/fish-speech && PYTHONPATH=/opt/fish-speech/fish-speech python -m tools.api --llama-checkpoint-path $LLAMA_CHECKPOINT_PATH --mode agent --compile --decoder-checkpoint-path $FISH_SPEECH_GAN_PATH --decoder-config-name firefly_gan_vq --listen 0.0.0.0:8080 & python -m tools.e2e_webui --model-path $FISH_SPEECH_MODEL_PATH --gan-path $FISH_SPEECH_GAN_PATH"]
+CMD ["sh", "-c", "cd /opt/fish-speech/fish-speech && PYTHONPATH=/opt/fish-speech/fish-speech python -m tools.api --load-asr-model --llama-checkpoint-path $LLAMA_CHECKPOINT_PATH --mode agent --compile --decoder-checkpoint-path $FISH_SPEECH_GAN_PATH --decoder-config-name firefly_gan_vq --listen 0.0.0.0:8080 & python -m tools.e2e_webui --load-asr-model --model-path $FISH_SPEECH_MODEL_PATH --gan-path $FISH_SPEECH_GAN_PATH"]

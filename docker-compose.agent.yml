@@ -28,7 +28,7 @@ services:
   fish-agent:
     build:
       context: . 
-      dockerfile: dockerfile.agent
+      dockerfile: Dockerfile.agent
     runtime: nvidia
     ports:
       - "3141:7860"  # For the Fish Agent Gradio web interface (e2e_webui.py)
