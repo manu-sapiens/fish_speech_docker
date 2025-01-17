@@ -1,12 +1,19 @@
 import io
+import os
 import re
 import wave
+from loguru import logger
 
 import gradio as gr
 import numpy as np
 
 from .fish_e2e import FishE2EAgent, FishE2EEventType
 from .schema import ServeMessage, ServeTextPart, ServeVQPart
+
+
+logger.info("=============== E2E_WEBUI.PY LOADED ===============")
+logger.info(f"Current working directory: {os.getcwd()}")
+logger.info(f"Current file location: {__file__}")
 
 
 def wav_chunk_header(sample_rate=44100, bit_depth=16, channels=1):
@@ -210,4 +217,5 @@ def create_demo():
 
 if __name__ == "__main__":
     demo = create_demo()
-    demo.launch(server_name="0.0.0.0", server_port=7860, share=True, root_path="/")
+    logger.info("Starting Gradio server on 0.0.0.0:7860...")
+    demo.launch(server_name="0.0.0.0", server_port=7860, share=True)

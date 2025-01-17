@@ -1,3 +1,5 @@
+version: "3.8"
+
 services:
   fish-speech:
     image: fishaudio/fish-speech:latest-dev
@@ -37,6 +39,8 @@ services:
       - ./checkpoints:/opt/fish-speech/checkpoints:ro  # Read-only mount
       - ./outputs:/opt/fish-speech/outputs
       - ./fish-speech:/opt/fish-speech/fish-speech  # Mount the fish-speech submodule
+      - ./patches/fish_e2e.py:/opt/fish-speech/fish-speech/tools/fish_e2e.py
+      - ./patches/e2e_webui.py:/opt/fish-speech/fish-speech/tools/e2e_webui.py
     working_dir: /opt/fish-speech
     deploy:
       resources:

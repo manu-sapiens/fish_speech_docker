@@ -4,6 +4,7 @@ ARG TARGETARCH
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PYTHONUNBUFFERED=1
 ENV GRADIO_SERVER_NAME=0.0.0.0
+ENV PYTHONPATH=/opt/fish-speech/fish-speech
 
 ARG DEPENDENCIES="  \
     ca-certificates \
@@ -34,24 +35,27 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
 
 WORKDIR /opt/fish-speech
 
-COPY ./fish-speech /opt/fish-speech/fish-speech
-
+# Install Python dependencies - this heavy layer will be cached
 RUN --mount=type=cache,target=/root/.cache,sharing=locked \
     set -ex \
     && python3 -m pip install --upgrade pip \
     && pip install torch torchaudio \
     && pip install gradio pyrootutils \
-    && cd fish-speech \
-    && pip install -e .[stable] \
     && pip install cachetools
 
-# Copy our patched versions
-COPY patches/fish_e2e.py /opt/fish-speech/fish-speech/tools/fish_e2e.py
-COPY patches/e2e_webui.py /opt/fish-speech/fish-speech/tools/e2e_webui.py
+# Copy fish-speech submodule first since we need it for pip install
+COPY ./fish-speech /opt/fish-speech/fish-speech
 
+# Install fish-speech package
+RUN --mount=type=cache,target=/root/.cache,sharing=locked \
+    set -ex \
+    && cd fish-speech \
+    && pip install -e .[stable]
+
+# Expose required ports
 EXPOSE 7860
 EXPOSE 8000
 EXPOSE 8080
 
 # Start both the API server and web UI
-CMD ["sh", "-c", "cd fish-speech && python -m tools.api --llama-checkpoint-path $LLAMA_CHECKPOINT_PATH --mode agent --compile --decoder-checkpoint-path $FISH_SPEECH_GAN_PATH --decoder-config-name firefly_gan_vq --listen 0.0.0.0:8080 & python -m tools.e2e_webui --model-path $FISH_SPEECH_MODEL_PATH --gan-path $FISH_SPEECH_GAN_PATH"]
+CMD ["sh", "-c", "cd /opt/fish-speech/fish-speech && PYTHONPATH=/opt/fish-speech/fish-speech python -m tools.api --llama-checkpoint-path $LLAMA_CHECKPOINT_PATH --mode agent --compile --decoder-checkpoint-path $FISH_SPEECH_GAN_PATH --decoder-config-name firefly_gan_vq --listen 0.0.0.0:8080 & python -m tools.e2e_webui --model-path $FISH_SPEECH_MODEL_PATH --gan-path $FISH_SPEECH_GAN_PATH"]

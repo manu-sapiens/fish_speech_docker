@@ -4,6 +4,7 @@ import io
 import json
 import os
 import struct
+import sys
 from dataclasses import dataclass
 from enum import Enum
 from typing import AsyncGenerator, Union
@@ -12,6 +13,7 @@ import httpx
 import numpy as np
 import ormsgpack
 import soundfile as sf
+from loguru import logger
 
 from .schema import (
     ServeMessage,
@@ -22,6 +24,11 @@ from .schema import (
     ServeVQPart,
 )
 
+logger.info("=============== FISH_E2E.PY LOADED ===============")
+logger.info(f"Current file: {__file__}")
+logger.info(f"Current directory: {os.getcwd()}")
+logger.info(f"Directory contents: {os.listdir('.')}")
+logger.info("================================================")
 
 class CustomAudioFrame:
     def __init__(self, data, sample_rate, num_channels, samples_per_channel):
@@ -88,6 +95,7 @@ class FishE2EAgent:
         self.client = httpx.AsyncClient(timeout=None)
 
     async def get_codes(self, audio_data, sample_rate):
+        logger.info(f"Converting audio data with shape: {audio_data.shape}")
         # Convert audio data to bytes
         audio_bytes = io.BytesIO()
         sf.write(audio_bytes, audio_data, sample_rate, format="WAV")
@@ -95,6 +103,7 @@ class FishE2EAgent:
 
         # Send audio to VQGAN encoder
         payload = ServeVQGANEncodeRequest(audios=[audio_bytes.read()])
+        logger.info("Sending request to VQGAN encoder...")
         resp = await self.client.post(
             f"{self.vqgan_url}/vqgan/encode",
             content=ormsgpack.packb(payload.dict()),
@@ -176,6 +185,7 @@ class FishE2EAgent:
                 if "speech" in event:
                     # Decode base64 audio
                     frame_bytes = base64.b64decode(event["speech"])
+                    logger.debug(f"Received audio frame size: {len(frame_bytes)}")
 
                     # Parse audio frame
                     frame = CustomAudioFrame(
@@ -212,15 +222,18 @@ async def main():
     import asyncio
     import soundfile as sf
 
+    logger.info("Loading audio file test.wav...")
     # Load audio file
     audio_data, sample_rate = sf.read("test.wav")
     if len(audio_data.shape) == 1:
-        audio_data = audio_data.reshape(-1, 1)
+        audio_data = audio_data[:, None]
 
     # Create agent
+    logger.info("Creating agent...")
     agent = FishE2EAgent()
 
     # Stream response
+    logger.info("Starting stream...")
     async for event in agent.stream(
         system_audio_data=None,
         user_audio_data=audio_data,
