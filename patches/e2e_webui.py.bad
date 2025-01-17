@@ -1,0 +1,274 @@
+import io
+import os
+import re
+import wave
+from datetime import datetime
+from pathlib import Path
+from loguru import logger
+
+import gradio as gr
+import numpy as np
+import soundfile as sf
+
+from tools.fish_e2e import FishE2EAgent, FishE2EEvent, FishE2EEventType
+from tools.schema import ServeMessage, ServeTextPart, ServeVQPart
+
+
+logger.info("=============== E2E_WEBUI.PY LOADED ===============")
+logger.info(f"Current working directory: {os.getcwd()}")
+logger.info(f"Current file location: {__file__}")
+
+# Create outputs directory if it doesn't exist
+OUTPUTS_DIR = Path("outputs")
+OUTPUTS_DIR.mkdir(exist_ok=True)
+
+
+def wav_chunk_header(sample_rate=44100, bit_depth=16, channels=1):
+    buffer = io.BytesIO()
+
+    with wave.open(buffer, "wb") as wav_file:
+        wav_file.setnchannels(channels)
+        wav_file.setsampwidth(bit_depth // 8)
+        wav_file.setframerate(sample_rate)
+
+    wav_header_bytes = buffer.getvalue()
+    buffer.close()
+    return wav_header_bytes
+
+
+class ChatState:
+    def __init__(self):
+        self.conversation = []
+        self.added_systext = False
+        self.added_sysaudio = False
+
+    def get_history(self):
+        results = []
+        current_pair = [None, None]  # [user, assistant]
+        
+        for msg in self.conversation:
+            content = self.repr_message(msg)
+            if msg.role == "user":
+                # Start new pair
+                if current_pair[0] is not None:
+                    results.append(tuple(current_pair))
+                current_pair = [content, None]
+            elif msg.role == "assistant":
+                # Complete current pair
+                if current_pair[0] is not None:
+                    current_pair[1] = content
+                    results.append(tuple(current_pair))
+                    current_pair = [None, None]
+                else:
+                    # Assistant message without user message, create empty user message
+                    results.append(("", content))
+            # Ignore system messages in chat display
+        
+        # Add final incomplete pair if exists
+        if current_pair[0] is not None:
+            results.append(tuple(current_pair))
+            
+        return results
+
+    def repr_message(self, msg: ServeMessage):
+        response = ""
+        for part in msg.parts:
+            if isinstance(part, ServeTextPart):
+                response += part.text
+            elif isinstance(part, ServeVQPart):
+                response += "[Audio]"
+        return response
+
+
+def clear_fn():
+    return ChatState()
+
+
+async def process_audio_input(
+    sys_audio_input, sys_text_input, audio_input, state: ChatState, text_input: str
+):
+    # Initialize agent
+    agent = FishE2EAgent()
+
+    # Process system message
+    if not state.added_systext and sys_text_input:
+        print("System text input:", sys_text_input)
+        state.conversation.append(
+            ServeMessage(role="system", parts=[ServeTextPart(text=sys_text_input)])
+        )
+        state.added_systext = True
+
+    # Process user message
+    if text_input:
+        print("User text input:", text_input)
+        state.conversation.append(
+            ServeMessage(role="user", parts=[ServeTextPart(text=text_input)])
+        )
+
+    # Get user audio codes
+    user_codes = None
+    if audio_input is not None:
+        print("User audio input")
+        user_codes = await agent.get_codes(audio_input, 24000)
+        state.conversation.append(
+            ServeMessage(
+                role="user",
+                parts=[ServeTextPart(text=""), ServeVQPart(codes=[user_codes])],
+            )
+        )
+
+    # Initialize response
+    response_text = ""
+    audio_chunks = []
+    response_codes = []
+
+    async for event in agent.stream(
+        system_audio_data=sys_audio_input,
+        user_audio_data=audio_input,
+        sample_rate=24000,
+        num_channels=1,
+        chat_ctx={"messages": [msg.model_dump() for msg in state.conversation]},
+    ):
+        if event.type == FishE2EEventType.TEXT_SEGMENT:
+            response_text += event.text
+            yield state.get_history(), None
+        elif event.type == FishE2EEventType.SPEECH_SEGMENT:
+            # Save audio chunk
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            audio_path = OUTPUTS_DIR / f"response_{timestamp}.wav"
+            
+            # Convert frame to audio data
+            frame_data = event.frame.tobytes()
+            audio_chunks.append(frame_data)
+            
+            # Save WAV file
+            with wave.open(str(audio_path), 'wb') as wav_file:
+                wav_file.setnchannels(1)
+                wav_file.setsampwidth(2)  # 16-bit audio
+                wav_file.setframerate(24000)
+                wav_file.writeframes(frame_data)
+            
+            logger.info(f"Saved audio to {audio_path}")
+            
+            # Send to Gradio - convert to float32 in [-1, 1] range
+            audio_data = np.frombuffer(frame_data, dtype=np.int16).astype(np.float32) / 32768.0
+            if len(audio_data) > 0:  # Only yield if we have data
+                yield state.get_history(), (24000, audio_data)
+            
+            if event.vq_codes is not None:
+                response_codes.extend(event.vq_codes)
+
+        print("event text is", event.text)
+
+    # Add response to conversation
+    state.conversation.append(
+        ServeMessage(
+            role="assistant",
+            parts=[
+                ServeTextPart(text=response_text),
+                ServeVQPart(codes=[response_codes] if response_codes else [[]]),
+            ],
+        )
+    )
+    
+    # Save final audio
+    if audio_chunks:  # Only save if we have audio chunks
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        final_path = OUTPUTS_DIR / f"response_{timestamp}_final.wav"
+        
+        with wave.open(str(final_path), 'wb') as wav_file:
+            wav_file.setnchannels(1)
+            wav_file.setsampwidth(2)  # 16-bit audio
+            wav_file.setframerate(24000)
+            wav_file.writeframes(b''.join(audio_chunks))
+        
+        logger.info(f"Saved final audio to {final_path}")
+        
+        # Send final audio to Gradio
+        final_audio = np.frombuffer(b''.join(audio_chunks), dtype=np.int16).astype(np.float32) / 32768.0
+        if len(final_audio) > 0:  # Only yield if we have data
+            yield state.get_history(), (24000, final_audio)
+
+
+async def process_text_input(
+    sys_audio_input, sys_text_input, state: ChatState, text_input: str
+):
+    return await process_audio_input(sys_audio_input, sys_text_input, None, state, text_input)
+
+
+def create_demo():
+    with gr.Blocks() as demo:
+        state = gr.State(ChatState)
+
+        with gr.Row():
+            with gr.Column(scale=1):
+                sys_text = gr.Textbox(
+                    show_label=False,
+                    placeholder="Enter system message...",
+                    lines=3,
+                )
+                sys_audio = gr.Audio(
+                    sources=["microphone", "upload"],
+                    type="numpy",
+                    label="System Audio",
+                )
+
+            with gr.Column(scale=4):
+                chatbot = gr.Chatbot(
+                    [],
+                    elem_id="chatbot",
+                    bubble_full_width=False,
+                    avatar_images=(None, "🤖"),
+                    height=600,
+                )
+
+                with gr.Row():
+                    audio = gr.Audio(
+                        sources=["microphone", "upload"],
+                        type="numpy",
+                        label="Input Audio",
+                    )
+
+                with gr.Row():
+                    text = gr.Textbox(
+                        show_label=False,
+                        placeholder="Enter text and press enter, or upload an audio file",
+                        lines=3,
+                    )
+
+                with gr.Row():
+                    submit = gr.Button("Submit")
+                    clear = gr.Button("Clear")
+
+        # Event handlers
+        submit_event = submit.click(
+            process_audio_input,
+            [sys_audio, sys_text, audio, state, text],
+            [chatbot, audio],
+        )
+
+        text_event = text.submit(
+            process_text_input,
+            [sys_audio, sys_text, state, text],
+            [chatbot, audio],
+        )
+
+        clear_event = clear.click(clear_fn, [], [state])
+        clear_event.then(lambda: [], [], [chatbot])
+        clear_event.then(lambda: None, [], [audio])
+        clear_event.then(lambda: "", [], [text])
+        clear_event.then(lambda: None, [], [sys_audio])
+        clear_event.then(lambda: "", [], [sys_text])
+
+        submit_event.then(lambda: None, [], [audio])
+        submit_event.then(lambda: "", [], [text])
+
+        text_event.then(lambda: "", [], [text])
+
+    return demo
+
+
+if __name__ == "__main__":
+    demo = create_demo()
+    logger.info("Starting Gradio server on 0.0.0.0:7860...")
+    demo.launch(server_name="0.0.0.0", server_port=7860, share=True)

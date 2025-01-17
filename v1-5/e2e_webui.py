@@ -4,9 +4,7 @@ import wave
 
 import gradio as gr
 
-# from fish_speech.utils.schema import ServeMessage, ServeTextPart, ServeVQPart
-from tools.fish_e2e import FishE2EAgent, FishE2EEvent, FishE2EEventType
-from tools.schema import ServeMessage, ServeTextPart, ServeVQPart
+from fish_speech.utils.schema import ServeMessage, ServeTextPart, ServeVQPart
 
 from .fish_e2e import FishE2EAgent, FishE2EEventType
 
@@ -61,7 +59,7 @@ def clear_fn():
 
 
 async def process_audio_input(
-    sys_audio_input, sys_text_input, audio_input, state: ChatState, text_input: str, debug_mode: bool
+    sys_audio_input, sys_text_input, audio_input, state: ChatState, text_input: str
 ):
     if audio_input is None and not text_input:
         raise gr.Error("No input provided")
@@ -108,7 +106,6 @@ async def process_audio_input(
             "messages": state.conversation,
             "added_sysaudio": state.added_sysaudio,
         },
-        debug_mode=debug_mode,
     ):
         if event.type == FishE2EEventType.USER_CODES:
             append_to_chat_ctx(ServeVQPart(codes=event.vq_codes), role="user")
@@ -123,10 +120,10 @@ async def process_audio_input(
 
 
 async def process_text_input(
-    sys_audio_input, sys_text_input, state: ChatState, text_input: str, debug_mode: bool
+    sys_audio_input, sys_text_input, state: ChatState, text_input: str
 ):
     async for event in process_audio_input(
-        sys_audio_input, sys_text_input, None, state, text_input, debug_mode
+        sys_audio_input, sys_text_input, None, state, text_input
     ):
         yield event
 
@@ -134,7 +131,6 @@ async def process_text_input(
 def create_demo():
     with gr.Blocks() as demo:
         state = gr.State(ChatState())
-        debug_mode = gr.State(False)
 
         with gr.Row():
             # Left column (70%) for chatbot and notes
@@ -174,9 +170,6 @@ def create_demo():
 
             # Right column (30%) for controls
             with gr.Column(scale=3):
-                debug_mode_checkbox = gr.Checkbox(
-                    label="Debug Mode (Encode-Decode Test)", value=False
-                )
                 sys_audio_input = gr.Audio(
                     sources=["upload"],
                     type="numpy",
@@ -206,21 +199,21 @@ def create_demo():
         # Event handlers
         audio_input.stop_recording(
             process_audio_input,
-            inputs=[sys_audio_input, sys_text_input, audio_input, state, text_input, debug_mode_checkbox],
+            inputs=[sys_audio_input, sys_text_input, audio_input, state, text_input],
             outputs=[chatbot, output_audio, audio_input, text_input],
             show_progress=True,
         )
 
         send_button.click(
             process_text_input,
-            inputs=[sys_audio_input, sys_text_input, state, text_input, debug_mode_checkbox],
+            inputs=[sys_audio_input, sys_text_input, state, text_input],
             outputs=[chatbot, output_audio, audio_input, text_input],
             show_progress=True,
         )
 
         text_input.submit(
             process_text_input,
-            inputs=[sys_audio_input, sys_text_input, state, text_input, debug_mode_checkbox],
+            inputs=[sys_audio_input, sys_text_input, state, text_input],
             outputs=[chatbot, output_audio, audio_input, text_input],
             show_progress=True,
         )
@@ -236,4 +229,4 @@ def create_demo():
 
 if __name__ == "__main__":
     demo = create_demo()
-    demo.launch(server_name="0.0.0.0", server_port=7860, share=True)
+    demo.launch(server_name="127.0.0.1", server_port=7860, share=True)

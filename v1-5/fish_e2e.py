@@ -13,15 +13,14 @@ import numpy as np
 import ormsgpack
 import soundfile as sf
 
-from tools.schema import (
+from fish_speech.utils.schema import (
+    ServeChatRequest,
     ServeMessage,
     ServeTextPart,
     ServeVQGANDecodeRequest,
     ServeVQGANEncodeRequest,
     ServeVQPart,
 )
-
-from tools.schema import ServeRequest as ServeChatRequest
 
 
 class CustomAudioFrame:
@@ -96,8 +95,8 @@ client = httpx.AsyncClient(
 
 class FishE2EAgent:
     def __init__(self):
-        self.llm_url = os.getenv("LLM_URL", "http://fish-agent:8080/v1/chat")
-        self.vqgan_url = os.getenv("VQGAN_URL", "http://fish-agent:8080")
+        self.llm_url = "http://localhost:8080/v1/chat"
+        self.vqgan_url = "http://localhost:8080"
         self.client = httpx.AsyncClient(timeout=None)
 
     async def get_codes(self, audio_data, sample_rate):
@@ -120,51 +119,19 @@ class FishE2EAgent:
 
     async def stream(
         self,
-        sys_audio_data,
-        audio_data,
-        sr,
-        num_channels,
-        chat_ctx=None,
-        debug_mode=False,
-    ):
-        if debug_mode and audio_data is not None:
-            # In debug mode, just encode and decode the audio without LLM processing
-            async with httpx.AsyncClient() as client:
-                # Encode the audio
-                encode_response = await client.post(
-                    f"{self.vqgan_url}/encode",
-                    json=ServeVQGANEncodeRequest(
-                        audio=audio_data.tolist(),
-                        sample_rate=sr,
-                    ).dict(),
-                )
-                codes = ormsgpack.unpackb(encode_response.content)
-                yield FishE2EEvent(type=FishE2EEventType.USER_CODES, vq_codes=codes)
+        system_audio_data: np.ndarray | None,
+        user_audio_data: np.ndarray | None,
+        sample_rate: int,
+        num_channels: int,
+        chat_ctx: dict | None = None,
+    ) -> AsyncGenerator[bytes, None]:
 
-                # Decode the audio
-                decode_response = await client.post(
-                    f"{self.vqgan_url}/decode",
-                    json=ServeVQGANDecodeRequest(codes=codes).dict(),
-                )
-                decoded_audio = np.array(ormsgpack.unpackb(decode_response.content))
-                yield FishE2EEvent(
-                    type=FishE2EEventType.SPEECH_SEGMENT,
-                    frame=CustomAudioFrame(
-                        decoded_audio.tobytes(),
-                        sr,
-                        num_channels,
-                        len(decoded_audio),
-                    ),
-                    vq_codes=codes,
-                )
-                return
-
-        if sys_audio_data is not None:
-            sys_codes = await self.get_codes(sys_audio_data, sr)
+        if system_audio_data is not None:
+            sys_codes = await self.get_codes(system_audio_data, sample_rate)
         else:
             sys_codes = None
-        if audio_data is not None:
-            user_codes = await self.get_codes(audio_data, sr)
+        if user_audio_data is not None:
+            user_codes = await self.get_codes(user_audio_data, sample_rate)
         # Step 2: Prepare LLM request
         if chat_ctx is None:
             sys_parts = [
@@ -172,7 +139,7 @@ class FishE2EAgent:
                     text='您是由 Fish Audio 设计的语音助手，提供端到端的语音交互，实现无缝用户体验。首先转录用户的语音，然后使用以下格式回答："Question: [用户语音]\n\nAnswer: [你的回答]\n"。'
                 ),
             ]
-            if sys_audio_data is not None:
+            if system_audio_data is not None:
                 sys_parts.append(ServeVQPart(codes=sys_codes))
             chat_ctx = {
                 "messages": [
@@ -188,7 +155,7 @@ class FishE2EAgent:
                 chat_ctx["messages"][0].parts.append(ServeVQPart(codes=sys_codes))
 
         prev_messages = chat_ctx["messages"].copy()
-        if audio_data is not None:
+        if user_audio_data is not None:
             yield FishE2EEvent(
                 type=FishE2EEventType.USER_CODES,
                 vq_codes=user_codes,
