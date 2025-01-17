@@ -3,5 +3,5 @@
 
 # Ignore nested git repositories
 /fish-speech/.git/
-
+outputs/
 .env

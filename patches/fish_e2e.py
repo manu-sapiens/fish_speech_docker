@@ -130,29 +130,65 @@ class FishE2EAgent:
         if debug_mode and audio_data is not None:
             # In debug mode, just encode and decode the audio without LLM processing
             async with httpx.AsyncClient() as client:
+                # Save input audio for comparison
+                os.makedirs("outputs", exist_ok=True)
+                input_path = os.path.join("outputs", "debug_input_audio.wav")
+                sf.write(input_path, audio_data, sr)
+                print(f"Saved input audio to {input_path}")
+                print(f"Input audio shape: {audio_data.shape}, dtype: {audio_data.dtype}, range: [{audio_data.min()}, {audio_data.max()}]")
+
+                # Convert audio to WAV format
+                audio_buffer = io.BytesIO()
+                sf.write(audio_buffer, audio_data, sr, format="WAV")
+                audio_buffer.seek(0)
+
                 # Encode the audio
                 encode_response = await client.post(
-                    f"{self.vqgan_url}/encode",
-                    json=ServeVQGANEncodeRequest(
-                        audio=audio_data.tolist(),
-                        sample_rate=sr,
-                    ).dict(),
+                    f"{self.vqgan_url}/v1/vqgan/encode",
+                    data=ormsgpack.packb(
+                        ServeVQGANEncodeRequest(audios=[audio_buffer.read()]),
+                        option=ormsgpack.OPT_SERIALIZE_PYDANTIC
+                    ),
+                    headers={"Content-Type": "application/msgpack"},
                 )
-                codes = ormsgpack.unpackb(encode_response.content)
+                encode_response_data = ormsgpack.unpackb(encode_response.content)
+                codes = encode_response_data["tokens"][0]
                 yield FishE2EEvent(type=FishE2EEventType.USER_CODES, vq_codes=codes)
 
                 # Decode the audio
                 decode_response = await client.post(
-                    f"{self.vqgan_url}/decode",
-                    json=ServeVQGANDecodeRequest(codes=codes).dict(),
+                    f"{self.vqgan_url}/v1/vqgan/decode",
+                    data=ormsgpack.packb(
+                        ServeVQGANDecodeRequest(tokens=[codes]),
+                        option=ormsgpack.OPT_SERIALIZE_PYDANTIC
+                    ),
+                    headers={"Content-Type": "application/msgpack"},
                 )
-                decoded_audio = np.array(ormsgpack.unpackb(decode_response.content))
+                raw_decoded = ormsgpack.unpackb(decode_response.content)
+                
+                if isinstance(raw_decoded, dict) and 'audios' in raw_decoded:
+                    # Convert bytes to audio data using numpy
+                    audio_bytes = raw_decoded['audios'][0]
+                    decoded_audio = np.frombuffer(audio_bytes, dtype=np.float16)
+                    # Convert float16 [-1, 1] to int16 range
+                    decoded_audio = (decoded_audio * 32768).astype(np.int16)
+                    print(f"Decoded audio shape: {decoded_audio.shape}, dtype: {decoded_audio.dtype}, range: [{decoded_audio.min()}, {decoded_audio.max()}]")
+                else:
+                    print(f"Missing 'audios' key in response or wrong format. Keys: {list(raw_decoded.keys())}")
+                    return
+
+                # Save decoded audio for troubleshooting
+                os.makedirs("outputs", exist_ok=True)
+                output_path = os.path.join("outputs", "debug_decoded_audio.wav")
+                sf.write(output_path, decoded_audio, sr)
+                print(f"Saved decoded audio to {output_path}")
+
                 yield FishE2EEvent(
                     type=FishE2EEventType.SPEECH_SEGMENT,
                     frame=CustomAudioFrame(
                         decoded_audio.tobytes(),
                         sr,
-                        num_channels,
+                        1,  # num_channels
                         len(decoded_audio),
                     ),
                     vq_codes=codes,
