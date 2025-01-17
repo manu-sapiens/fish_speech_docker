@@ -54,5 +54,10 @@ services:
       - FISH_SPEECH_MODEL_PATH=/opt/fish-speech/checkpoints/fish-speech-1.4
       - FISH_SPEECH_GAN_PATH=/opt/fish-speech/checkpoints/fish-speech-1.4/firefly-gan-vq-fsq-8x1024-21hz-generator.pth
       - LLAMA_CHECKPOINT_PATH=/opt/fish-speech/checkpoints/fish-speech-1.4
+      - GRADIO_ALLOW_FLAGGING=never
+      - GRADIO_ROOT_PATH=/
+      - GRADIO_SERVER_HOST=0.0.0.0
+      - LLM_URL=http://fish-agent:8080/v1/chat
+      - VQGAN_URL=http://fish-agent:8080
     depends_on:
       - fish-speech  # Ensure fish-speech starts first
